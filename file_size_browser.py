@@ -252,7 +252,10 @@ class FileSizeBrowser(QMainWindow):
         
         # 获取选中项的路径
         path = item.data(0, Qt.ItemDataRole.UserRole)
-        is_file = "📄" in item.text(0)  # 通过图标判断是文件还是文件夹
+        text = item.text(0)
+        # 使用assert确保项目必须是文件或文件夹之一
+        assert "📄" in text or "📁" in text, f"无效的项目类型: {text}"
+        is_file = "📄" in text
         
         # 显示菜单并获取选择的动作
         action = menu.exec(self.tree.viewport().mapToGlobal(position))
