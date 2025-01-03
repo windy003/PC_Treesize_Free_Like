@@ -309,6 +309,11 @@ class FileSizeBrowser(QMainWindow):
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
+    
+    # 设置应用程序图标
+    app_icon = QIcon(resource_path("icon.ico"))
+    app.setWindowIcon(app_icon)
+    
     window = FileSizeBrowser()
     window.show()
     sys.exit(app.exec()) 
