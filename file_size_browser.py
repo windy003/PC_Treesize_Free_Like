@@ -59,11 +59,24 @@ class FileSizeBrowser(QMainWindow):
     def __init__(self):
         super().__init__()
         
+        # 添加调试日志
+        print("开始初始化主窗口")
+        
         # 设置应用图标
         app_icon = QIcon(resource_path("icon.ico"))
         self.setWindowIcon(app_icon)
         
+        # 设置窗口标题（添加版本号）
+        self.setWindowTitle("文件大小浏览器 v2025/2/15-01")
+        
         # 创建系统托盘图标
+        self.init_tray_icon(app_icon)
+        
+        # 修改驱动器选择对话框的处理
+        self.init_drive_selection()
+
+    def init_tray_icon(self, app_icon):
+        """初始化系统托盘图标"""
         self.tray_icon = QSystemTrayIcon(self)
         self.tray_icon.setIcon(app_icon)
         self.tray_icon.setToolTip("文件大小浏览器")
@@ -75,43 +88,54 @@ class FileSizeBrowser(QMainWindow):
         quit_action = tray_menu.addAction("退出")
         quit_action.triggered.connect(QApplication.quit)
         self.tray_icon.setContextMenu(tray_menu)
-        
-        # 显示托盘图标
         self.tray_icon.show()
-        
-        # 处理托盘图标的点击事件
         self.tray_icon.activated.connect(self.tray_icon_activated)
-        
-        # 显示驱动器选择对话框
+
+    def init_drive_selection(self):
+        """初始化驱动器选择"""
+        print("开始选择驱动器")
         dialog = DriveSelector()
         if dialog.exec() == QDialog.DialogCode.Accepted and dialog.get_selected_drive():
             selected_drive = dialog.get_selected_drive()
-        else:
-            sys.exit()
+            print(f"用户选择了驱动器: {selected_drive}")
             
-        self.setWindowTitle(f"文件大小浏览器 - {selected_drive}")
-        self.setGeometry(100, 100, 800, 600)
+            try:
+                # 创建主窗口部件
+                self.init_main_window(selected_drive)
+                
+                # 尝试加载驱动器内容
+                self.load_directory(selected_drive)
+                print(f"成功加载驱动器: {selected_drive}")
+                
+            except Exception as e:
+                print(f"错误: {str(e)}")
+                QMessageBox.critical(self, "错误", f"初始化失败：{str(e)}")
+                # 重新显示驱动器选择对话框
+                self.init_drive_selection()
+        else:
+            print("用户取消了选择")
+            sys.exit()
 
-        # 创建主窗口部件
+    def init_main_window(self, selected_drive):
+        """初始化主窗口组件"""
+        print("初始化主窗口组件")
+        self.selected_drive = selected_drive
+        # 修改标题，保持版本号显示
+        self.setWindowTitle(f"文件大小浏览器 v2025/2/15-01 - {selected_drive}")
+        self.setGeometry(100, 100, 800, 600)
+        
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         layout = QVBoxLayout(central_widget)
 
-        # 创建树形视图
         self.tree = QTreeWidget()
         self.tree.setHeaderLabels(["名称", "大小"])
         self.tree.setColumnWidth(0, 400)
         layout.addWidget(self.tree)
 
-        # 连接信号
         self.tree.itemExpanded.connect(self.on_item_expanded)
-
-        # 添加右键菜单支持
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self.show_context_menu)
-
-        # 加载选中的驱动器
-        self.load_directory(selected_drive)
 
     def get_directory_size(self, path):
         """获取目录大小"""
@@ -141,60 +165,83 @@ class FileSizeBrowser(QMainWindow):
 
     def load_directory(self, path):
         """加载目录内容"""
+        print(f"开始加载目录: {path}")
         try:
-            # 跳过特殊系统目录
-            if any(skip_dir in path.lower() for skip_dir in ['$recycle.bin', 'system volume information']):
-                return
-                
+            # 先测试目录访问权限
+            if not os.access(path, os.R_OK):
+                print(f"无法访问目录: {path}")
+                raise PermissionError(f"无法访问 {path}")
+
             # 获取所有文件和文件夹
             items = []
-            for entry in os.scandir(path):
+            try:
+                print("尝试扫描目录")
+                entries = list(os.scandir(path))
+                print(f"找到 {len(entries)} 个项目")
+            except PermissionError as e:
+                print(f"扫描目录时权限错误: {str(e)}")
+                raise PermissionError(f"无法访问 {path}")
+            except Exception as e:
+                print(f"扫描目录时发生错误: {str(e)}")
+                raise
+
+            # 处理每个项目
+            for entry in entries:
                 try:
-                    # 跳过特殊系统目录
                     if any(skip_dir in entry.path.lower() for skip_dir in ['$recycle.bin', 'system volume information']):
+                        print(f"跳过系统目录: {entry.path}")
                         continue
                         
                     if entry.is_file(follow_symlinks=False):
                         try:
                             size = entry.stat().st_size
                             items.append((entry.name, size, entry.path, True))
-                        except (PermissionError, FileNotFoundError, OSError):
+                        except (PermissionError, FileNotFoundError, OSError) as e:
+                            print(f"处理文件时出错: {entry.path} - {str(e)}")
                             continue
                     elif entry.is_dir(follow_symlinks=False):
                         try:
                             size = self.get_directory_size(entry.path)
                             items.append((entry.name, size, entry.path, False))
-                        except (PermissionError, FileNotFoundError, OSError):
-                            continue
-                except (PermissionError, FileNotFoundError, OSError):
+                        except (PermissionError, FileNotFoundError, OSError) as e:
+                            print(f"处理目录时出错: {entry.path} - {str(e)}")
+                            items.append((entry.name, 0, entry.path, False))
+                except (PermissionError, FileNotFoundError, OSError) as e:
+                    print(f"处理项目时出错: {entry.path} - {str(e)}")
                     continue
 
-            # 按大小排序
-            items.sort(key=lambda x: x[1], reverse=True)
+            # 更新界面
+            self.update_tree_items(items)
+            print("成功更新界面")
 
-            # 清空现有项目
-            self.tree.clear()
-
-            # 添加排序后的项目
-            for name, size, path, is_file in items:
-                item = QTreeWidgetItem()
-                item.setText(0, name)
-                item.setText(1, humanize.naturalsize(size))
-                item.setData(0, Qt.ItemDataRole.UserRole, path)
-                
-                # 设置图标
-                if is_file:
-                    item.setText(0, f"📄 {name}")
-                else:
-                    item.setText(0, f"📁 {name}")
-                    # 添加一个临时子项目以显示展开箭头
-                    temp = QTreeWidgetItem()
-                    item.addChild(temp)
-                
-                self.tree.addTopLevelItem(item)
-
+        except PermissionError as e:
+            print(f"权限错误: {str(e)}")
+            QMessageBox.warning(self, "权限错误", str(e))
         except Exception as e:
-            print(f"Error loading directory: {e}")
+            print(f"未知错误: {str(e)}")
+            QMessageBox.critical(self, "错误", f"加载目录时出错：{str(e)}")
+
+    def update_tree_items(self, items):
+        """更新树形视图的项目"""
+        # 按大小排序
+        items.sort(key=lambda x: x[1], reverse=True)
+
+        # 清空现有项目
+        self.tree.clear()
+
+        # 添加排序后的项目
+        for name, size, path, is_file in items:
+            item = QTreeWidgetItem()
+            item.setText(0, f"{'📄' if is_file else '📁'} {name}")
+            item.setText(1, humanize.naturalsize(size))
+            item.setData(0, Qt.ItemDataRole.UserRole, path)
+            
+            if not is_file:
+                # 添加一个临时子项目以显示展开箭头
+                temp = QTreeWidgetItem()
+                item.addChild(temp)
+            
+            self.tree.addTopLevelItem(item)
 
     def on_item_expanded(self, item):
         """处理项目展开事件"""
@@ -294,8 +341,10 @@ class FileSizeBrowser(QMainWindow):
 
     def tray_icon_activated(self, reason):
         """处理托盘图标的点击事件"""
-        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:  # 改为双击
-            self.show()  # 显示窗口
+        # 修改为单击就显示窗口
+        if reason == QSystemTrayIcon.ActivationReason.Trigger:
+            self.show()
+            self.setWindowState(self.windowState() & ~Qt.WindowState.WindowMinimized)  # 取消最小化状态
             self.raise_()  # 将窗口提到最前
             self.activateWindow()  # 激活窗口
 
@@ -303,10 +352,12 @@ class FileSizeBrowser(QMainWindow):
         """重写关闭事件，点击关闭按钮时最小化到托盘"""
         event.ignore()
         self.hide()
+        # 确保窗口状态正确保存
+        self.setWindowState(Qt.WindowState.WindowNoState)
         self.tray_icon.showMessage(
             "文件大小浏览器",
-            "应用程序已最小化到系统托盘",
-            QSystemTrayIcon.MessageIcon.Information,  # 修复 Icon 属性错误
+            "应用程序已最小化到系统托盘，单击托盘图标可以重新打开窗口",
+            QSystemTrayIcon.MessageIcon.Information,
             2000
         )
 
